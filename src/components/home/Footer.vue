@@ -19,7 +19,7 @@
 		<div class="w-full lg:w-1/2 flex flex-row-reverse items-center lg:flex-row gap-6">
 			<img
 				src="/png/Left.png"
-				class="object-cover w-20 md:w-1/4 lg:w-full h-full"
+				class="object-cover w-20 md:w-1/4 xl:w-full h-auto"
 			/>
 			<div class="flex flex-col gap-4 md:gap-6 pb-5 md:py-5 text-[14px] md:text-base">
 				<span class="text-white tracking-[.2em]">NEWS</span>
