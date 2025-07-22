@@ -4,9 +4,14 @@ import home from '../views/home.vue'
 const routes = [
 	{
 		path: '/',
-		name: 'test',
+		name: 'home',
 		component: home,
 	},
+	// {
+	// 	path: '/article',
+	// 	name: 'article',
+	// 	component: article,
+	// },
 ]
 
 const router = createRouter({
