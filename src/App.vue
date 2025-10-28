@@ -95,6 +95,7 @@
 						<option
 							v-for="p in team"
 							:key="p.name + 'buy'"
+							:disabled="p.name === sale.from"
 						>
 							{{ p.name }}
 						</option>
@@ -188,7 +189,7 @@
 					v-for="p in team"
 					:key="p.name"
 				>
-					{{ p.name }} {{ p.beads }} 顆
+					{{ p.name }} {{ p.beads }} 組
 				</li>
 			</ul>
 			<h3 class="font-semibold mt-2">販賣紀錄</h3>
@@ -197,7 +198,7 @@
 					v-for="s in sales"
 					:key="s.from + s.to"
 				>
-					{{ s.from }} → {{ s.to }} {{ s.count }} 顆
+					{{ s.from }} → {{ s.to }} {{ s.count }} 組
 				</li>
 			</ul>
 		</div>
@@ -430,7 +431,7 @@ function downloadReport() {
 	}
 	content += '\n'
 	team.value.forEach(p => {
-		content += `${p.name} ${p.beads} 顆\n`
+		content += `${p.name} ${p.beads} 組\n`
 	})
 
 	// 販賣紀錄
@@ -438,7 +439,7 @@ function downloadReport() {
 		content += '\n' + '='.repeat(50) + '\n'
 		content += '【販賣紀錄】\n\n'
 		sales.value.forEach(s => {
-			content += `${s.from} → ${s.to} ${s.count} 顆\n`
+			content += `${s.from} → ${s.to} ${s.count} 組\n`
 		})
 	}
 
