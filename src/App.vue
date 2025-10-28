@@ -76,6 +76,7 @@
 						<option
 							v-for="p in team"
 							:key="p.name"
+							:disabled="isSellerUsed(p.name, index)"
 						>
 							{{ p.name }}
 						</option>
@@ -141,10 +142,17 @@
 			>
 				返回上一步
 			</button>
+			<button
+				v-if="hasFinalRound"
+				@click="downloadReport"
+				class="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 mt-4"
+			>
+				📥 下載紀錄
+			</button>
 		</div>
 
 		<!-- 5. 回合紀錄 -->
-		<div class="w-full md:w-2/6 bg-gray-50 p-4 rounded shadow overflow-y-auto h-[60vh]">
+		<div class="w-full md:w-2/6 bg-gray-50 p-4 rounded shadow overflow-y-auto h-[100vh]">
 			<h2 class="font-bold mb-2 text-lg">回合紀錄</h2>
 			<div
 				v-for="(round, i) in rounds"
@@ -215,12 +223,14 @@ const newPlayer = ref('')
 const roundBeads = ref(0)
 const rounds = ref([])
 const history = ref([])
-const salesConfig = ref([]) // {from, to}
+const salesConfig = ref([])
 const sales = ref([])
-const salesHistory = ref([]) // 記錄每個回合的銷售狀態
+const salesHistory = ref([])
 const lastIndex = ref(0)
-const randomBeads = ref(0) // 隨機珠子數（多出來的部分）
+const lastIndexHistory = ref([])
+const randomBeads = ref(0)
 const totalBeads = computed(() => team.value.reduce((sum, p) => sum + (p.beads || 0), 0))
+const hasFinalRound = computed(() => rounds.value.some(r => r.isFinal))
 
 function addToTeam(name) {
 	if (!name) return
@@ -238,8 +248,13 @@ function removeFromTeam(name) {
 function addSale() {
 	salesConfig.value.push({ from: '', to: '' })
 }
+
 function removeSale(index) {
 	salesConfig.value.splice(index, 1)
+}
+
+function isSellerUsed(name, currentIndex) {
+	return salesConfig.value.some((sale, idx) => idx !== currentIndex && sale.from === name)
 }
 
 function distributeRound(beadCount, isFinal = false) {
@@ -251,140 +266,99 @@ function distributeRound(beadCount, isFinal = false) {
 
 	const result = []
 	let remaining = beadCount
-	let idx = lastIndex.value
+	let idx = rounds.value.length === 0 ? 0 : (lastIndex.value + 1) % n
 	const baseOrder = []
 
-	// 建立當前回合的隊伍順序
 	for (let i = 0; i < n; i++) baseOrder.push(team.value[(idx + i) % n])
 
-	// 保存當前狀態（撤銷時需要還原）
 	history.value.push(JSON.parse(JSON.stringify(team.value)))
 	salesHistory.value.push(JSON.parse(JSON.stringify(sales.value)))
+	lastIndexHistory.value.push(lastIndex.value)
 
 	if (isFinal) {
-		// 最後一回合：計算總珠子數，計算基數，補足沒達到的，餘數算隨機
+		const peopleUntilFirstPerson = idx === 0 ? n : n - idx
 
-		// 1. 計算總珠子數（前面回合 + 最後一回合）
-		// 前面回合的珠子已經分配完了，計算前面所有回合的珠子總數
-		const previousRoundsTotal = rounds.value.reduce((sum, round) => sum + round.beads, 0)
-		const totalShouldBe = previousRoundsTotal + beadCount
-		const n = team.value.length
+		if (beadCount <= peopleUntilFirstPerson) {
+			if (beadCount < peopleUntilFirstPerson) {
+				const whoWillBeInThisRound = []
+				for (let i = 0; i < peopleUntilFirstPerson; i++) {
+					whoWillBeInThisRound.push(baseOrder[i].name)
+				}
 
-		// 2. 計算每人應該有的基數
-		const basePerPerson = Math.floor(totalShouldBe / n)
-		const remainder = totalShouldBe % n // 餘數
-
-		// 3. 計算每個人實際上應該有的珠子數（包括自己拿到的 + 賣掉的）
-		const playerCurrentTotal = team.value.map(p => {
-			const sold = sales.value
-				.filter(s => s.from === p.name)
-				.reduce((sum, s) => sum + s.count, 0)
-			return {
-				name: p.name,
-				beads: p.beads || 0,
-				total: (p.beads || 0) + sold, // 目前珠子 + 賣掉的珠子
-			}
-		})
-
-		// 4. 先找出所有沒達到基數的人，按照隊伍順序補給他們
-		let remaining = beadCount
-
-		// 找出所有需要補珠子的人（目前持有的珠子數 < 基數）
-		const playersNeedMoreNames = playerCurrentTotal
-			.filter(p => p.beads < basePerPerson)
-			.map(p => p.name)
-
-		// 如果所有人都達到基數了，那所有珠子都算隨機搶
-		if (playersNeedMoreNames.length === 0) {
-			const takerNames = team.value.map(p => p.name)
-			for (let i = 0; i < remaining; i++) {
-				result.push({ name: takerNames.join(' '), note: '搶' })
-			}
-			randomBeads.value = remaining
-		} else {
-			// 從 lastIndex 開始，按照隊伍順序找出需要補珠子的人
-			let idx = lastIndex.value
-
-			while (remaining > 0) {
-				let hasAnyNeed = false
-
-				for (let i = 0; i < n && remaining > 0; i++) {
-					const player = team.value[(idx + i) % n]
-					const playerInfo = playerCurrentTotal.find(x => x.name === player.name)
-
-					// 如果這個人還需要補珠子（檢查 beads 而不是用 list）
-					if (playerInfo.beads < basePerPerson) {
-						hasAnyNeed = true
-
-						// 分配一顆珠子
-						const sale = salesConfig.value.find(s => s.from === player.name)
-						if (sale && sale.to) {
-							const buyer = team.value.find(p => p.name === sale.to)
-							if (buyer) {
-								buyer.beads++
-								playerInfo.beads++ // 更新 playerInfo 的 beads（即使販賣，也算該人分配到了）
-								// 紀錄販賣顆數
-								let s = sales.value.find(
-									x => x.from === player.name && x.to === buyer.name,
-								)
-								if (!s)
-									sales.value.push({
-										from: player.name,
-										to: buyer.name,
-										count: 1,
-									})
-								else s.count++
-								result.push({ name: buyer.name, note: `${player.name}賣` })
-							}
-						} else {
-							player.beads++
-							playerInfo.beads++ // 更新 playerInfo 的 beads
-							result.push({ name: player.name, note: '' })
+				for (let i = 0; i < beadCount; i++) {
+					result.push({ name: whoWillBeInThisRound.join(' '), note: '搶' })
+				}
+				randomBeads.value = beadCount
+			} else {
+				for (let i = 0; i < beadCount; i++) {
+					const player = baseOrder[i]
+					const sale = salesConfig.value.find(s => s.from === player.name)
+					if (sale && sale.to) {
+						const buyer = team.value.find(p => p.name === sale.to)
+						if (buyer) {
+							buyer.beads++
+							let s = sales.value.find(
+								x => x.from === player.name && x.to === buyer.name,
+							)
+							if (!s)
+								sales.value.push({
+									from: player.name,
+									to: buyer.name,
+									count: 1,
+								})
+							else s.count++
+							result.push({ name: buyer.name, note: `${player.name}賣` })
 						}
-						remaining--
+					} else {
+						player.beads++
+						result.push({ name: player.name, note: '' })
 					}
 				}
-
-				// 如果所有人都達到基數了，停止補珠
-				if (!hasAnyNeed) break
 			}
-
-			// 剩下的珠子是「需要補珠子的人」搶的
-			if (remaining > 0) {
-				// 重新計算目前還需要補珠子的人
-				const currentPlayersNeedMore = playerCurrentTotal
-					.filter(p => p.beads < basePerPerson)
-					.map(p => p.name)
-
-				// 如果有需要補珠子的人，他們搶；如果沒有（所有人都達標了），所有人搶
-				const takerNames =
-					currentPlayersNeedMore.length > 0
-						? team.value
-								.filter(p => currentPlayersNeedMore.includes(p.name))
-								.map(p => p.name)
-						: team.value.map(p => p.name)
-
-				for (let i = 0; i < remaining; i++) {
-					result.push({ name: takerNames.join(' '), note: '搶' })
+		} else {
+			for (let i = 0; i < peopleUntilFirstPerson; i++) {
+				const player = baseOrder[i]
+				const sale = salesConfig.value.find(s => s.from === player.name)
+				if (sale && sale.to) {
+					const buyer = team.value.find(p => p.name === sale.to)
+					if (buyer) {
+						buyer.beads++
+						let s = sales.value.find(x => x.from === player.name && x.to === buyer.name)
+						if (!s)
+							sales.value.push({
+								from: player.name,
+								to: buyer.name,
+								count: 1,
+							})
+						else s.count++
+						result.push({ name: buyer.name, note: `${player.name}賣` })
+					}
+				} else {
+					player.beads++
+					result.push({ name: player.name, note: '' })
 				}
-				randomBeads.value = remaining
 			}
+
+			const remainingBeads = beadCount - peopleUntilFirstPerson
+			const allNames = team.value.map(p => p.name).join(' ')
+			for (let i = 0; i < remainingBeads; i++) {
+				result.push({ name: allNames, note: '搶' })
+			}
+			randomBeads.value = remainingBeads
 		}
 
 		lastIndex.value = 0
 	} else {
 		while (remaining > 0) {
 			const player = baseOrder[0]
-			baseOrder.push(baseOrder.shift()) // 輪流
+			baseOrder.push(baseOrder.shift())
 			remaining--
 
-			// 處理販賣
 			const sale = salesConfig.value.find(s => s.from === player.name)
-			if (sale) {
+			if (sale && sale.to) {
 				const buyer = team.value.find(p => p.name === sale.to)
 				if (buyer) {
 					buyer.beads++
-					// 紀錄販賣顆數
 					let s = sales.value.find(x => x.from === player.name && x.to === buyer.name)
 					if (!s) sales.value.push({ from: player.name, to: buyer.name, count: 1 })
 					else s.count++
@@ -398,7 +372,7 @@ function distributeRound(beadCount, isFinal = false) {
 				result.push({ name: player.name, note: '' })
 			}
 		}
-		lastIndex.value = team.value.findIndex(p => p.name === baseOrder[0].name)
+		lastIndex.value = (idx + beadCount - 1) % n
 	}
 
 	rounds.value.push({ beads: beadCount, distribution: result, isFinal })
@@ -417,25 +391,69 @@ function undoLastRound() {
 	if (rounds.value.length === 0) return
 	const lastRound = rounds.value[rounds.value.length - 1]
 
-	// 如果是最後一回合，需要恢復狀態
-	if (lastRound.isFinal) {
-		// 恢復隊伍和販賣狀態
-		if (history.value.length === 0) return
-		const lastState = history.value.pop()
-		const lastSalesState = salesHistory.value.pop()
-		team.value = lastState.map(p => ({ ...p }))
-		sales.value = lastSalesState.map(s => ({ ...s }))
-		randomBeads.value = 0
-		rounds.value.pop()
-		return
-	}
-
-	// 否則需要恢復歷史狀態
 	if (history.value.length === 0) return
 	const lastState = history.value.pop()
 	const lastSalesState = salesHistory.value.pop()
+	const lastIndexState = lastIndexHistory.value.pop()
+
 	team.value = lastState.map(p => ({ ...p }))
 	sales.value = lastSalesState.map(s => ({ ...s }))
+	lastIndex.value = lastIndexState
 	rounds.value.pop()
+
+	if (lastRound.isFinal) {
+		randomBeads.value = 0
+	}
+}
+
+function downloadReport() {
+	let content = '='.repeat(50) + '\n'
+	content += '珠子分配紀錄\n'
+	content += '='.repeat(50) + '\n\n'
+
+	// 回合紀錄
+	content += '【回合紀錄】\n\n'
+	rounds.value.forEach((round, i) => {
+		content += `=== 回合 ${i + 1} 珠子 ${round.beads}${round.isFinal ? ' End' : ''} ===\n`
+		round.distribution.forEach((entry, idx) => {
+			content += `${idx + 1}. ${entry.name} ${entry.note}\n`
+		})
+		content += '\n'
+	})
+
+	// 總珠子數
+	content += '='.repeat(50) + '\n'
+	content += '【總珠子數】\n\n'
+	content += `總珠子數：${totalBeads.value}\n`
+	if (randomBeads.value > 0) {
+		content += `隨機：${randomBeads.value}\n`
+	}
+	content += '\n'
+	team.value.forEach(p => {
+		content += `${p.name} ${p.beads} 顆\n`
+	})
+
+	// 販賣紀錄
+	if (sales.value.length > 0) {
+		content += '\n' + '='.repeat(50) + '\n'
+		content += '【販賣紀錄】\n\n'
+		sales.value.forEach(s => {
+			content += `${s.from} → ${s.to} ${s.count} 顆\n`
+		})
+	}
+
+	content += '\n' + '='.repeat(50) + '\n'
+	content += `生成時間：${new Date().toLocaleString('zh-TW')}\n`
+
+	// 創建下載
+	const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+	const url = URL.createObjectURL(blob)
+	const link = document.createElement('a')
+	link.href = url
+	link.download = `珠子分配紀錄_${new Date().getTime()}.txt`
+	document.body.appendChild(link)
+	link.click()
+	document.body.removeChild(link)
+	URL.revokeObjectURL(url)
 }
 </script>
